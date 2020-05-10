@@ -175,7 +175,7 @@ func main() {
 			os.Exit(1)
 		}
 		url := fmt.Sprintf("https://crt.sh/?q=%s&output=json", *targetDomain)
-		log.Info(fmt.Sprintf("Sucesfully fetched from crt.sh %s\n", *targetDomain))
+		log.Debugf("Sucesfully fetched from crt.sh %s\n", *targetDomain)
 		var doc *http.Response
 		if doc, err = http.Get(url); err != nil {
 			fmt.Println(err)
