@@ -10,13 +10,13 @@ import (
 )
 
 type RRSetAnswer struct {
-	Count     uint
-	TimeFirst uint32
-	TimeLast  uint32
-	RRName    string
-	RRType    string
-	Bailiwick string
-	rdata     []string
+	Count      uint
+	Time_First uint32
+	Time_Last  uint32
+	RRName     string
+	RRType     string
+	Bailiwick  string
+	Rdata      []string
 }
 type DNSDBClient struct {
 	ApiKey string

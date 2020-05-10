@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const LOOKUP_DOMAIN string = "golang.org"
+const LOOKUP_DOMAIN string = "www.golang.org"
 const LOOKUP_QTYPE string = "ANY"
 
 func TestLookup(t *testing.T) {
@@ -26,6 +26,9 @@ func TestLookup(t *testing.T) {
 	}
 	if res[0].RRName != LOOKUP_DOMAIN+"." {
 		t.Fatalf("Unexpected record: %v", res[0])
+	}
+	if len(res[0].Rdata) == 0 {
+		t.Fatalf("Empty Rdata")
 	}
 	t.Log(res[0])
 }
