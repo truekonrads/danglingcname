@@ -2,17 +2,19 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
+	"github.com/fatih/color"
 	"github.com/miekg/dns"
 	"io/ioutil"
+	"net/http"
+	"os"
 	"strings"
-	//"net/http"
-	//"os"
 )
 
 import "errors"
 
-const DNSSERVER string = "172.31.0.1:53"
+var DNSSERVER string = "8.8.8.8:53"
 
 func lookupCNAME(target string, server string) (result []string, ok bool) {
 	return lookupRecord(target, server, dns.TypeCNAME)
@@ -27,7 +29,7 @@ func lookupRecord(target string, server string, qtype uint16) (result []string, 
 	m.RecursionDesired = true
 	r, _, err := c.Exchange(m, server)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println(target, err)
 		return nil, false
 
 	}
@@ -105,21 +107,33 @@ func worker(in chan string, out chan ProcessingResult) {
 }
 func main() {
 
-	//url := fmt.Sprintf("https://crt.sh/?q=%s&output=json", os.Args[1])
-	//doc, err := http.Get(url)
-	var body []byte
-	body, err := ioutil.ReadFile("/tmp/a.json")
+	targetDomain := flag.String("domain", "", "Target domain. (Required)")
+	dnsServer := flag.String("server", DNSSERVER, "DNS Server. (Optional)")
+	numWorkers := flag.Int("workers", 5, "Number of workers (Optional)")
 
-	if err != nil {
-		fmt.Println(err)
-		return
+	jsonFile := flag.String("jsonfile", "", "JSON file from which to read results (Optional)")
+	flag.Parse()
+	if *targetDomain == "" {
+		flag.PrintDefaults()
+		os.Exit(1)
 	}
-	//var i int
-	//body, err = ioutil.ReadAll(doc)
-	//body, err = ioutil.ReadAll(doc.Body)
-	if err != nil {
-		fmt.Println(err)
-		return
+	DNSSERVER = *dnsServer
+
+	var body []byte
+	var err error
+	fmt.Printf("[+] Targeting %v\n", *targetDomain)
+	if _, err = os.Stat(*jsonFile); err == nil {
+		body, err = ioutil.ReadFile(*jsonFile)
+		fmt.Printf("Sucesfully read %s", *jsonFile)
+	} else {
+		url := fmt.Sprintf("https://crt.sh/?q=%s&output=json", *targetDomain)
+		fmt.Printf("Sucesfully fetched from crt.sh %s\n", *targetDomain)
+		var doc *http.Response
+		if doc, err = http.Get(url); err != nil {
+			fmt.Println(err)
+			return
+		}
+		body, err = ioutil.ReadAll(doc.Body)
 	}
 
 	records := make([]CRTRecord, 0)
@@ -134,39 +148,26 @@ func main() {
 	results := make(chan ProcessingResult)
 	recmap := make(map[string]bool)
 	counter := 0
-	for i := 0; i < 3; i++ {
+	for i := 0; i < *numWorkers; i++ {
 		go worker(queue, results)
 	}
 
 	go func() {
+
 		for res := range results {
-			// cname, ok := lookupCNAME(s+".", "8.8.8.8:53")
-			// //fmt.Println(cname, ok)
-			// if ok == false {
-			// 	fmt.Printf("Can't process %v\n", s)
-			// 	//panic(err)
-			// 	continue
-			// }
-			// if len(cname) > 0 {
-			// 	a, ok := lookupA(s+".", "8.8.8.8:53")
-			// 	if ok == false {
-			// 		fmt.Printf("Can't process %v\n", s)
-			// 		//panic(err)
-			// 		continue
-			// 	}
 			if len(res.CNAMEPointsTo) > 0 {
 				if len(res.ARecords) > 0 {
-					fmt.Printf("%v: is a CNAME and points to %v and resolves to %v\n",
+					color.Blue(fmt.Sprintf("%v: is a CNAME and points to %v and resolves to %v\n",
 						res.Name,
 						strings.Join(res.CNAMEPointsTo, ", "),
 						strings.Join(res.ARecords, ", "),
-					)
+					))
 				} else {
-					fmt.Printf("!!! %v: is a CNAME and points to %v and resolves to nothing (%v)\n",
+					color.Green(fmt.Sprintf("!!! %v: is a CNAME and points to %v and resolves to nothing (%v)\n",
 						res.Name,
 						strings.Join(res.CNAMEPointsTo, ", "),
 						strings.Join(res.ARecords, ", "),
-					)
+					))
 				}
 
 			}
