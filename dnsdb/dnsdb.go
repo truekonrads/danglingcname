@@ -36,18 +36,23 @@ func (dnsdb *DNSDBClient) Lookup(name string, qtype string) ([]RRSetAnswer, erro
 	if resp, err = client.Do(req); err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != 200 {
-		return nil, errors.New(fmt.Sprintf("Unexpected status code '%v': %s", resp.StatusCode, resp.Status))
-	}
 	records := make([]RRSetAnswer, 0)
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		r := RRSetAnswer{}
-		b := []byte(scanner.Text())
-		if err = json.Unmarshal(b, &r); err != nil {
-			return nil, err
+	switch {
+	case resp.StatusCode == 404:
+		// return make([]RRSetAnswer, 0), nil
+		// this means we got no data back
+	case resp.StatusCode == 200:
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			r := RRSetAnswer{}
+			b := []byte(scanner.Text())
+			if err = json.Unmarshal(b, &r); err != nil {
+				return nil, err
+			}
+			records = append(records, r)
 		}
-		records = append(records, r)
+	default:
+		return nil, errors.New(fmt.Sprintf("Unexpected status code '%v': %s", resp.StatusCode, resp.Status))
 	}
 	return records, nil
 

@@ -1,10 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
-	// "github.com/fatih/color"
 	"github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	. "github.com/truekonrads/danglingcname/dnsdb"
@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 )
 
 import "errors"
@@ -31,7 +32,7 @@ func lookupRecord(target string, server string, qtype uint16) (result []string, 
 	m.RecursionDesired = true
 	r, _, err := c.Exchange(m, server)
 	if err != nil {
-		fmt.Println(target, err)
+		log.Errorf("Unble to resolve: %s, %v", target, err)
 		return nil, false
 
 	}
@@ -104,29 +105,42 @@ func worker(in chan string, out chan ProcessingResult) {
 }
 func main() {
 
-	targetDomain := flag.String("domain", "", "Target domain. (Required)")
+	targetDomain := flag.String("domain", "", "Target domain.")
 	dnsServer := flag.String("server", DNSSERVER, "DNS Server. (Optional)")
 	numWorkers := flag.Int("workers", 5, "Number of workers (Optional)")
 	useDNSDB := flag.Bool("dnsdb", false, "Use DNSDB (set DNSDB_KEY env var) (Optional)")
-	usecrt := flag.Bool("use", false, "Use crt.sh as source")
+	usecrt := flag.Bool("usecrtsh", false, "Use crt.sh as source")
+	sourcefile := flag.String("sourcefile", "", "Specify a source file to read DNS records, one per line (Optional)")
+	debug := flag.Bool("debug", false, "Debug mode")
 	// jsonFile := flag.String("jsonfile", "", "JSON file from which to read results (Optional)")
 	flag.Parse()
-	if *targetDomain == "" {
-		flag.PrintDefaults()
-		os.Exit(1)
+	// if *targetDomain == "" {
+	// 	flag.PrintDefaults()
+	// 	os.Exit(1)
+	// }
+	if *debug {
+		log.SetLevel(log.DebugLevel)
+		log.Debug("Debugging on")
 	}
+	targetMap := make(map[string]bool)
 	DNSSERVER = *dnsServer
 
 	var body []byte
 	var err error
 	var dnsdb_records []RRSetAnswer
 	var records []CRTRecord
-	log.Debug(fmt.Sprintf("[+] Targeting %v\n", *targetDomain))
-	if !*useDNSDB && !*usecrt {
-		fmt.Printf("Select at least one source\n")
-		return
-	}
+	var wg sync.WaitGroup
+	var rwg sync.WaitGroup
+	//log.Debug(fmt.Sprintf("Targeting %v\n", *targetDomain))
+	//fmt.Println("useDNSDB: ", *useDNSDB)
+	//fmt.Println("usecrt: ", *usecrt)
+
 	if *useDNSDB {
+		if *targetDomain == "" {
+			fmt.Println("Please specify a domain!")
+			flag.PrintDefaults()
+			os.Exit(1)
+		}
 		log.Debug(fmt.Sprintf("Loading data from DNSDB\n"))
 		key := os.Getenv("DNSDB_KEY")
 		if len(key) == 0 {
@@ -140,15 +154,26 @@ func main() {
 			fmt.Println("DNSDB", err)
 			return
 		}
-		log.Info(fmt.Sprintf("Sucesfully fetched from DNSDB %s\n", *targetDomain))
+		for _, r := range dnsdb_records {
+			var rrname string
+			if strings.HasSuffix(r.RRName, ".") {
+				rrname = r.RRName[:len(r.RRName)-1]
+			} else {
+				rrname = r.RRName
+			}
+			targetMap[rrname] = true
+
+		}
+		log.Debug(fmt.Sprintf("Total %v records received from dnsdb\n", len(dnsdb_records)))
 
 	}
 
-	// if _, err = os.Stat(*jsonFile); err == nil {
-	// 	body, err = ioutil.ReadFile(*jsonFile)
-	// 	fmt.Printf("Sucesfully read %s", *jsonFile)
-	// }
 	if *usecrt {
+		if *targetDomain == "" {
+			log.Println("Please specify a domain!")
+			flag.PrintDefaults()
+			os.Exit(1)
+		}
 		url := fmt.Sprintf("https://crt.sh/?q=%s&output=json", *targetDomain)
 		log.Info(fmt.Sprintf("Sucesfully fetched from crt.sh %s\n", *targetDomain))
 		var doc *http.Response
@@ -163,75 +188,75 @@ func main() {
 			fmt.Println(err)
 			return
 		}
+		for i := 0; i < len(records); i++ {
+			nv := strings.Split(records[i].Name_value, " ")
+			// fmt.Println(nv)
+			for _, cert_values := range nv {
+				for _, s := range strings.Split(cert_values, "\n") {
+					targetMap[s] = true
+				}
+			}
+		}
+		log.Debug(fmt.Sprintf("Total %v records received from crt.sh\n", len(records)))
+	}
+
+	if len(*sourcefile) > 0 {
+
+		var fh *os.File
+		if fh, err = os.Open(*sourcefile); err != nil {
+			log.Errorf("Can't read/open file '%s': %v", *sourcefile, err)
+			return
+		}
+		i := 0
+		scanner := bufio.NewScanner(fh)
+		for scanner.Scan() {
+			targetMap[scanner.Text()] = true
+			i += 1
+		}
+		log.Debugf("Total %v records received from %s\n", i, *sourcefile)
 	}
 
 	//fmt.Println(records)
 	queue := make(chan string)
 	results := make(chan ProcessingResult)
-	recmap := make(map[string]bool)
-	counter := 0
+	// recmap := make(map[string]bool)
+	// counter := 0
 	for i := 0; i < *numWorkers; i++ {
-		go worker(queue, results)
+
+		go func() {
+			wg.Add(1)
+			worker(queue, results)
+			wg.Done()
+		}()
 	}
 
 	go func() {
-
+		rwg.Add(1)
+		defer rwg.Done()
 		for res := range results {
 			if len(res.CNAMEPointsTo) > 0 {
 				if len(res.ARecords) > 0 {
-					log.Debug(
-						fmt.Sprintf("%v: is a CNAME and points to %v and resolves to %v\n",
-							res.Name,
-							strings.Join(res.CNAMEPointsTo, ", "),
-							strings.Join(res.ARecords, ", "),
-						))
-				} else {
-					log.Info(fmt.Sprintf("!!! %v: is a CNAME and points to %v and resolves to nothing (%v)\n",
+					log.Debugf("%v: is a CNAME and points to %v and resolves to %v\n",
 						res.Name,
 						strings.Join(res.CNAMEPointsTo, ", "),
 						strings.Join(res.ARecords, ", "),
-					))
+					)
+				} else {
+					log.Infof("%v: is a CNAME and points to %v and resolves to nothing (%v)\n",
+						res.Name,
+						strings.Join(res.CNAMEPointsTo, ", "),
+						strings.Join(res.ARecords, ", "),
+					)
 				}
 
 			}
 		}
 	}()
-
-	log.Debug(fmt.Sprintf("Total %v records received from crt.sh\n", len(records)))
-	for i := 0; i < len(records); i++ {
-		nv := strings.Split(records[i].Name_value, " ")
-		// fmt.Println(nv)
-		for _, cert_values := range nv {
-			for _, s := range strings.Split(cert_values, "\n") {
-				if _, ok := recmap[s]; !ok {
-					recmap[s] = true
-					queue <- s
-					counter += 1
-				}
-
-			}
-		}
+	for key, _ := range targetMap {
+		queue <- key
 	}
-	log.Debug(fmt.Sprintf("Loaded %v results from crt.sh\n", counter))
-	counter = 0
-	log.Debug(fmt.Sprintf("Total %v records received from dnsdb\n", len(dnsdb_records)))
-	if len(dnsdb_records) > 0 {
-		for _, r := range dnsdb_records {
-			var rrname string
-			if strings.HasSuffix(r.RRName, ".") {
-				rrname = r.RRName[:len(r.RRName)-1]
-			} else {
-				rrname = r.RRName
-			}
-			if _, ok := recmap[rrname]; !ok {
-				recmap[rrname] = true
-				queue <- rrname
-				counter += 1
-			}
-
-		}
-	}
-	log.Debug(fmt.Sprintf("Loaded %v new results from DNSDB\n", counter))
 	close(queue)
-
+	wg.Wait()
+	close(results)
+	rwg.Wait()
 }
