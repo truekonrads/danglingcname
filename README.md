@@ -51,8 +51,7 @@ Usage of ./danglingcname:
 
 # Example
 ```
-./danglingcname -usecrtsh -workers 5 -server 172.31.0.1:53 -domain pwc.com
-INFO[0000] Sucesfully fetched from crt.sh pwc.com  
+go run main.go -usecrtsh -domain esriuk.com
 ...
 ```
 # DNS-DANGLING

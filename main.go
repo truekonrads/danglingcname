@@ -112,12 +112,7 @@ func main() {
 	usecrt := flag.Bool("usecrtsh", false, "Use crt.sh as source")
 	sourcefile := flag.String("sourcefile", "", "Specify a source file to read DNS records, one per line (Optional)")
 	debug := flag.Bool("debug", false, "Debug mode")
-	// jsonFile := flag.String("jsonfile", "", "JSON file from which to read results (Optional)")
 	flag.Parse()
-	// if *targetDomain == "" {
-	// 	flag.PrintDefaults()
-	// 	os.Exit(1)
-	// }
 	if *debug {
 		log.SetLevel(log.DebugLevel)
 		log.Debug("Debugging on")
@@ -131,9 +126,6 @@ func main() {
 	var records []CRTRecord
 	var wg sync.WaitGroup
 	var rwg sync.WaitGroup
-	//log.Debug(fmt.Sprintf("Targeting %v\n", *targetDomain))
-	//fmt.Println("useDNSDB: ", *useDNSDB)
-	//fmt.Println("usecrt: ", *usecrt)
 
 	if *useDNSDB {
 		if *targetDomain == "" {
@@ -184,7 +176,6 @@ func main() {
 		}
 		for i := 0; i < len(records); i++ {
 			nv := strings.Split(records[i].Name_value, " ")
-			// fmt.Println(nv)
 			for _, cert_values := range nv {
 				for _, s := range strings.Split(cert_values, "\n") {
 					targetMap[s] = true
@@ -210,7 +201,6 @@ func main() {
 		log.Debugf("Total %v records received from %s\n", i, *sourcefile)
 	}
 
-	//fmt.Println(records)
 	queue := make(chan string)
 	results := make(chan ProcessingResult)
 	// recmap := make(map[string]bool)
