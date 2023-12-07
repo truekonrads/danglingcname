@@ -55,3 +55,4 @@ Usage of ./danglingcname:
 INFO[0000] Sucesfully fetched from crt.sh pwc.com  
 ...
 ```
+# DNS-DANGLING

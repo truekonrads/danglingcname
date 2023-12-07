@@ -3,19 +3,19 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
-	"github.com/miekg/dns"
-	log "github.com/sirupsen/logrus"
-	. "github.com/truekonrads/danglingcname/dnsdb"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
-)
 
-import "errors"
+	"github.com/miekg/dns"
+	log "github.com/sirupsen/logrus"
+	. "github.com/truekonrads/danglingcname/dnsdb"
+)
 
 var DNSSERVER string = "8.8.8.8:53"
 
@@ -169,13 +169,7 @@ func main() {
 	}
 
 	if *usecrt {
-		if *targetDomain == "" {
-			log.Println("Please specify a domain!")
-			flag.PrintDefaults()
-			os.Exit(1)
-		}
 		url := fmt.Sprintf("https://crt.sh/?q=%s&output=json", *targetDomain)
-		log.Debugf("Sucesfully fetched from crt.sh %s\n", *targetDomain)
 		var doc *http.Response
 		if doc, err = http.Get(url); err != nil {
 			fmt.Println(err)
@@ -252,7 +246,7 @@ func main() {
 			}
 		}
 	}()
-	for key, _ := range targetMap {
+	for key := range targetMap {
 		queue <- key
 	}
 	close(queue)
